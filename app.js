@@ -6,34 +6,54 @@ const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFracti
 const whole = new Intl.NumberFormat("en");
 const PAGE_SIZE = 50;
 
-let D, byYear, byPage, titleIndex, partial;
+let META, partial;
 let browseLimit = PAGE_SIZE;
+const yearCache = new Map();
+const shardCache = new Map();
+let pagesIndex = null;
 
+const getJSON = async (url) => {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  return r.json();
+};
+const once = (cache, key, url) => {
+  if (!cache.has(key)) cache.set(key, getJSON(url).catch((e) => { cache.delete(key); throw e; }));
+  return cache.get(key);
+};
+const loadYear = (y) => once(yearCache, y, `data/years/${y}.json`);
+const loadShard = (k) => once(shardCache, k, `data/hist/${k}.json`);
+function loadPagesIndex() {
+  if (!pagesIndex) pagesIndex = getJSON("data/pages.json").then((rows) =>
+    rows.map(([pid, title, t, n, best]) => ({ pid: String(pid), title, key: title.toLowerCase(), t, n, best })));
+  return pagesIndex;
+}
+
+const typeName = (i) => META.types[i] || "";
 function kindLabel(t) {
   if (t === "human") return "Person";
   if (t === "Wikimedia list article") return "List";
+  if (t === "Wikimedia disambiguation page") return "Disambiguation page";
   return t ? t[0].toUpperCase() + t.slice(1) : "";
 }
-const page = (pid) => D.pages[pid];
-const isPerson = (pid) => page(pid)[2] === "human";
 const wikiUrl = (pid) => `https://en.wikipedia.org/?curid=${pid}`;
 const yearLabel = (y) => (partial[y] ? `${y}*` : String(y));
+function topShare(rank, year) {
+  const pct = (100 * rank) / META.pages_edited[year];
+  if (pct < 0.01) return "top 0.01%";
+  return `top ${pct < 1 ? pct.toPrecision(1) : Math.ceil(pct)}%`;
+}
 
 async function init() {
-  D = await (await fetch("data/top500.json")).json();
-  partial = D.partial_years || {};
-  byYear = new Map(D.years.map((y) => [y, []]));
-  byPage = new Map();
-  for (const [year, rank, pid, M, editors] of D.rows) {
-    const r = { year, rank, pid: String(pid), M, editors };
-    byYear.get(year).push(r);
-    if (!byPage.has(r.pid)) byPage.set(r.pid, []);
-    byPage.get(r.pid).push(r);
-  }
-  titleIndex = Object.entries(D.pages).map(([pid, [title]]) => ({ pid, title, key: title.toLowerCase() }));
+  META = await getJSON("data/meta.json");
+  partial = META.partial_years || {};
 
-  $("#snap").textContent = D.snapshot;
-  const p = Object.entries(partial).map(([y, m]) => `${y} covers only its first ${m} months, so its scores are lower and not directly comparable with full years.`);
+  const total = Object.values(META.pages_scored).reduce((a, b) => a + b, 0);
+  $("#lede-n").textContent = whole.format(META.n_pages);
+  $("#lookup-sub").textContent = `${whole.format(META.n_pages)} pages had at least one edit war between ${META.years[0]} and ${META.years[META.years.length - 1]}. Pages that never did aren't listed.`;
+  $("#snap").textContent = META.snapshot;
+  $("#n-page-years").textContent = whole.format(total);
+  const p = Object.entries(partial).map(([y, m]) => `${y} covers only its first ${m} months, so its scores run lower and aren't directly comparable with full years.`);
   $("#partial-note").textContent = p.join(" ") || "All years are complete.";
 
   renderStrip();
@@ -45,21 +65,19 @@ async function init() {
 
 /* ---------- #1 strip ---------- */
 function renderStrip() {
-  const cards = D.years.map((y) => {
-    const rows = byYear.get(y);
-    const top = rows[0];
-    const person = rows.find((r) => isPerson(r.pid));
-    const pick = (r, cls) => r ? `
+  const cards = META.years.map((y) => {
+    const { page, person } = META.winners[y];
+    const pick = ([pid, title, rank], cls) => `
       <div class="${cls}">
         <div class="lbl">${cls === "person" ? "Top person" : "Top page"}</div>
-        <button data-pid="${r.pid}">${esc(page(r.pid)[0])}</button>
-        ${cls === "person" && r.rank > 1 ? `<div class="rk">#${r.rank} overall</div>` : ""}
-      </div>` : "";
-    const samePerson = person && person.pid === top.pid;
+        <button data-pid="${pid}">${esc(title)}</button>
+        ${cls === "person" && rank > 1 ? `<div class="rk">#${rank} overall</div>` : ""}
+      </div>`;
+    const same = person && person[0] === page[0];
     return `<div class="card" role="listitem">
       <div class="yr">${y}${partial[y] ? ` <small>partial</small>` : ""}</div>
-      ${pick(top, "top")}
-      ${samePerson ? `<div class="rk">Also the top person</div>` : pick(person, "person")}
+      ${pick(page, "top")}
+      ${same ? `<div class="rk">Also the top person</div>` : person ? pick(person, "person") : ""}
     </div>`;
   });
   const strip = $("#strip");
@@ -74,33 +92,33 @@ function renderStrip() {
 /* ---------- search ---------- */
 function setupSearch() {
   const q = $("#q"), list = $("#suggest");
-  let items = [], active = -1;
+  let items = [], active = -1, seq = 0;
 
   const close = () => { list.hidden = true; q.setAttribute("aria-expanded", "false"); active = -1; };
   const highlight = () => [...list.children].forEach((li, i) => li.setAttribute("aria-selected", String(i === active)));
+  const show = (html) => { list.innerHTML = html; list.hidden = false; q.setAttribute("aria-expanded", "true"); };
 
-  q.addEventListener("input", () => {
+  q.addEventListener("focus", () => loadPagesIndex().catch(() => {}), { once: true });
+  q.addEventListener("input", async () => {
     const s = q.value.trim().toLowerCase();
+    const mine = ++seq;
     if (s.length < 2) return close();
+    if (!(pagesIndex && pagesIndex.done)) show(`<li class="none">Loading ${whole.format(META.n_pages)} titles…</li>`);
+    const index = await loadPagesIndex();
+    pagesIndex.done = true;
+    if (mine !== seq) return;
+    // index is sorted by best rank, so the first matches are the most fought-over
     const starts = [], has = [];
-    for (const t of titleIndex) {
-      if (t.key.startsWith(s)) starts.push(t);
-      else if (t.key.includes(s)) has.push(t);
+    for (const t of index) {
+      if (t.key.startsWith(s)) { if (starts.length < 12) starts.push(t); }
+      else if (has.length < 12 && t.key.includes(s)) has.push(t);
+      if (starts.length >= 12) break;
     }
-    const best = (t) => Math.min(...byPage.get(t.pid).map((r) => r.rank));
-    const sorter = (a, b) => best(a) - best(b);
-    items = [...starts.sort(sorter), ...has.sort(sorter)].slice(0, 12);
-    if (!items.length) {
-      list.innerHTML = `<li class="none">No page with that title made a top 500</li>`;
-    } else {
-      list.innerHTML = items.map((t, i) => {
-        const n = byPage.get(t.pid).length;
-        return `<li role="option" id="opt${i}" data-pid="${t.pid}"><span>${esc(t.title)}</span><span class="meta">best #${best(t)} · ${n} yr${n > 1 ? "s" : ""}</span></li>`;
-      }).join("");
-    }
+    items = [...starts, ...has].slice(0, 12);
     active = -1;
-    list.hidden = false;
-    q.setAttribute("aria-expanded", "true");
+    show(items.length
+      ? items.map((t, i) => `<li role="option" id="opt${i}" data-pid="${t.pid}"><span>${esc(t.title)}</span><span class="meta">best #${whole.format(t.best)} · ${t.n} yr${t.n > 1 ? "s" : ""}</span></li>`).join("")
+      : `<li class="none">No edit war recorded for a page with that title</li>`);
   });
   q.addEventListener("keydown", (e) => {
     if (list.hidden || !items.length) return;
@@ -122,14 +140,20 @@ function openPage(pid) {
 }
 
 /* ---------- page view ---------- */
-function renderPage(pid) {
+async function renderPage(pid) {
   const view = $("#page-view");
-  const info = page(pid);
-  if (!info) { view.hidden = true; return; }
-  const [title, , type] = info;
-  const rows = byPage.get(pid);
+  const shard = await loadShard(Number(pid) % META.n_shards);
+  const entry = shard[pid];
+  if (!entry) {
+    view.innerHTML = `<p class="empty">No edit war recorded for this page.</p>`;
+    view.hidden = false;
+    return;
+  }
+  const [title, t, hist] = entry;
+  const rows = hist.map(([year, rank, M, editors]) => ({ year, rank, M, editors }));
   const best = rows.reduce((a, b) => (b.rank < a.rank ? b : a));
   const peak = rows.reduce((a, b) => (b.M > a.M ? b : a));
+  const type = typeName(t);
   $("#q").value = title;
 
   view.innerHTML = `
@@ -139,31 +163,32 @@ function renderPage(pid) {
       <a href="${wikiUrl(pid)}" target="_blank" rel="noopener">Open on Wikipedia ↗</a>
     </div>
     <div class="pv-stats">
-      <div><b>#${best.rank}</b>best rank (${yearLabel(best.year)})</div>
-      <div><b>${rows.length}</b>of ${D.years.length} years in the top 500</div>
+      <div><b>#${whole.format(best.rank)}</b>best rank (${yearLabel(best.year)}), ${topShare(best.rank, best.year)} of pages edited</div>
+      <div><b>${rows.length}</b>of ${META.years.length} years with an edit war</div>
       <div><b>${compact.format(peak.M)}</b>peak score (${yearLabel(peak.year)})</div>
     </div>
     ${chart(rows)}
-    <p class="chart-note">Rank among all English Wikipedia pages that year (log scale). Grey marks: not in that year's top 500.${Object.keys(partial).length ? " * Partial year." : ""}</p>
+    <p class="chart-note">Rank among all English Wikipedia pages that year (log scale). Grey marks: no edit war that year.${Object.keys(partial).length ? " * Partial year." : ""}</p>
     <details>
       <summary>Year by year</summary>
       <div class="table-wrap" style="margin-top:10px">
         <table><thead><tr><th>Year</th><th class="num">Rank</th><th class="num">Score</th><th class="num">Editors in mutual reverts</th></tr></thead>
-        <tbody>${rows.map((r) => `<tr><td>${yearLabel(r.year)}</td><td class="num">#${r.rank}</td><td class="num">${whole.format(r.M)}</td><td class="num">${whole.format(r.editors)}</td></tr>`).join("")}</tbody></table>
+        <tbody>${rows.map((r) => `<tr><td>${yearLabel(r.year)}</td><td class="num">#${whole.format(r.rank)}</td><td class="num">${whole.format(r.M)}</td><td class="num">${whole.format(r.editors)}</td></tr>`).join("")}</tbody></table>
       </div>
     </details>`;
   view.hidden = false;
 }
 
 function chart(rows) {
-  const W = 680, H = 230, L = 40, R = 14, T = 16, B = 30;
-  const years = D.years, n = years.length;
+  const W = 680, H = 230, L = 50, R = 14, T = 16, B = 30;
+  const years = META.years, n = years.length;
+  const top = Math.max(...Object.values(META.pages_scored));
   const x = (y) => L + ((y - years[0]) / (years[n - 1] - years[0])) * (W - L - R);
-  const y = (rank) => T + (Math.log10(rank) / Math.log10(500)) * (H - T - B);
+  const y = (rank) => T + (Math.log10(rank) / Math.log10(top)) * (H - T - B);
   const at = new Map(rows.map((r) => [r.year, r]));
   let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Rank by year">`;
-  for (const t of [1, 10, 100, 500]) {
-    svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text x="${L - 8}" y="${y(t) + 4}" text-anchor="end">#${t}</text>`;
+  for (let t = 1; t <= top; t *= 10) {
+    svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text x="${L - 8}" y="${y(t) + 4}" text-anchor="end">#${compact.format(t)}</text>`;
   }
   for (const yr of years) {
     if (yr % 5 === 0 || yr === years[0] || (yr === years[n - 1] && yr % 5 >= 3)) {
@@ -179,23 +204,23 @@ function chart(rows) {
   const best = rows.reduce((a, b) => (b.rank < a.rank ? b : a));
   for (const yr of years) {
     const r = at.get(yr);
-    if (!r) { svg += `<rect class="miss" x="${x(yr) - 3}" y="${H - B + 4}" width="6" height="3" rx="1"><title>${yr}: not in top 500</title></rect>`; continue; }
-    svg += `<circle class="dot${partial[yr] ? " partial" : ""}" cx="${x(yr)}" cy="${y(r.rank)}" r="4"><title>${yearLabel(yr)}: #${r.rank}, score ${whole.format(r.M)}</title></circle>`;
+    if (!r) { svg += `<rect class="miss" x="${x(yr) - 3}" y="${H - B + 4}" width="6" height="3" rx="1"><title>${yr}: no edit war</title></rect>`; continue; }
+    svg += `<circle class="dot${partial[yr] ? " partial" : ""}" cx="${x(yr)}" cy="${y(r.rank)}" r="4"><title>${yearLabel(yr)}: #${whole.format(r.rank)}, score ${whole.format(r.M)}</title></circle>`;
   }
   const bx = x(best.year), anchor = bx > W - 80 ? "end" : bx < L + 40 ? "start" : "middle";
-  svg += `<text class="val" x="${bx}" y="${Math.max(y(best.rank) - 9, 11)}" text-anchor="${anchor}">#${best.rank}</text>`;
+  svg += `<text class="val" x="${bx}" y="${Math.max(y(best.rank) - 9, 11)}" text-anchor="${anchor}">#${whole.format(best.rank)}</text>`;
   return svg + "</svg>";
 }
 
 /* ---------- browse ---------- */
 function setupBrowse() {
   const yearSel = $("#year"), kindSel = $("#kind"), filt = $("#filter");
-  yearSel.innerHTML = [...D.years].reverse().map((y) => `<option value="${y}">${y}${partial[y] ? " (partial)" : ""}</option>`).join("");
-  const full = D.years.filter((y) => !partial[y]);
+  yearSel.innerHTML = [...META.years].reverse().map((y) => `<option value="${y}">${y}${partial[y] ? " (partial)" : ""}</option>`).join("");
+  const full = META.years.filter((y) => !partial[y]);
   yearSel.value = String(full[full.length - 1]);
   kindSel.innerHTML = `<option value="">All</option>` +
-    D.type_groups.map((t) => `<option value="${esc(t)}">${esc(kindLabel(t))}</option>`).join("") +
-    `<option value="__other">Everything else</option>`;
+    META.type_groups.map((t) => `<option value="${META.types.indexOf(t)}">${esc(kindLabel(t))}</option>`).join("") +
+    `<option value="other">Everything else</option>`;
   const reset = () => { browseLimit = PAGE_SIZE; renderBrowse(); };
   yearSel.addEventListener("change", () => { history.replaceState(null, "", `#year=${yearSel.value}`); reset(); });
   kindSel.addEventListener("change", reset);
@@ -208,19 +233,23 @@ function setupBrowse() {
   renderBrowse();
 }
 
-function renderBrowse() {
-  const year = +$("#year").value, kind = $("#kind").value, f = $("#filter").value.trim().toLowerCase();
-  const groups = new Set(D.type_groups);
-  const rows = byYear.get(year).filter((r) => {
-    const [title, , t] = page(r.pid);
-    if (kind === "__other" ? groups.has(t) : kind && t !== kind) return false;
+let browseSeq = 0;
+async function renderBrowse() {
+  const mine = ++browseSeq;
+  const year = $("#year").value, kind = $("#kind").value, f = $("#filter").value.trim().toLowerCase();
+  const data = await loadYear(year);
+  if (mine !== browseSeq) return;
+  const groups = new Set(META.type_groups.map((t) => META.types.indexOf(t)));
+  const rows = data.filter(([, , , , title, t]) => {
+    if (kind === "other" ? groups.has(t) : kind !== "" && t !== +kind) return false;
     return !f || title.toLowerCase().includes(f);
   });
-  $("#browse-sub").textContent = `${rows.length} of the top 500 pages of ${year}${partial[year] ? ` (first ${partial[year]} months only)` : ""}. Click a title to see its history.`;
+  const all = data.length;
+  $("#browse-sub").textContent = `${whole.format(all)} pages had an edit war in ${year}, out of ${whole.format(META.pages_edited[year])} pages edited${partial[year] ? ` (first ${partial[year]} months only)` : ""}.${rows.length !== all ? ` ${whole.format(rows.length)} match your filters.` : ""} Click a title to see its history.`;
   const body = $("#table tbody");
-  body.innerHTML = rows.length ? rows.slice(0, browseLimit).map((r) => {
-    const [title, , t] = page(r.pid);
-    return `<tr><td class="num">${r.rank}</td><td><button data-pid="${r.pid}"${t === "human" ? ' class="p"' : ""}>${esc(title)}</button></td><td class="kind hide-sm">${esc(kindLabel(t))}</td><td class="num">${compact.format(r.M)}</td><td class="num hide-sm">${whole.format(r.editors)}</td></tr>`;
+  body.innerHTML = rows.length ? rows.slice(0, browseLimit).map(([rank, pid, M, editors, title, t]) => {
+    const type = typeName(t);
+    return `<tr><td class="num">${whole.format(rank)}</td><td><button data-pid="${pid}"${type === "human" ? ' class="p"' : ""}>${esc(title)}</button></td><td class="kind hide-sm">${esc(kindLabel(type))}</td><td class="num">${compact.format(M)}</td><td class="num hide-sm">${whole.format(editors)}</td></tr>`;
   }).join("") : `<tr><td colspan="5" class="empty">No pages match.</td></tr>`;
   $("#more").hidden = rows.length <= browseLimit;
 }
@@ -229,10 +258,9 @@ function renderBrowse() {
 function route() {
   const h = new URLSearchParams(location.hash.slice(1));
   if (h.get("page")) {
-    renderPage(h.get("page"));
-    $("#lookup").scrollIntoView();
+    renderPage(h.get("page")).then(() => $("#lookup").scrollIntoView());
   }
-  if (h.get("year") && byYear.has(+h.get("year"))) {
+  if (h.get("year") && META.years.includes(+h.get("year"))) {
     $("#year").value = h.get("year");
     browseLimit = PAGE_SIZE;
     renderBrowse();

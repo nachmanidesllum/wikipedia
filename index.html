@@ -12,7 +12,7 @@
   <div class="wrap">
     <p class="kicker">English Wikipedia · 2005–2026</p>
     <h1>Where Wikipedia fights</h1>
-    <p class="lede">The 500 most fought-over pages of every year, ranked by an edit-war score built from 25 years of edit history. Look up any page, or browse a year.</p>
+    <p class="lede">Every English Wikipedia page that saw an edit war, <span id="lede-n">207,102</span> in all, ranked year by year with a score built from 25 years of edit history. Look up any page, or browse a year.</p>
   </div>
 </header>
 
@@ -28,7 +28,7 @@
   <section id="lookup" aria-labelledby="lookup-h">
     <div class="section-head">
       <h2 id="lookup-h">Look up a page</h2>
-      <p class="sub">Only pages that made a year's top 500 are included: 7,910 pages in all.</p>
+      <p class="sub" id="lookup-sub"></p>
     </div>
     <div class="search">
       <input id="q" type="search" placeholder="Try “Cristiano Ronaldo” or “Pluto”" autocomplete="off" spellcheck="false" aria-label="Search pages" aria-controls="suggest" aria-expanded="false">
@@ -63,6 +63,8 @@
       <p>This is the “M” measure from Sumi, Yasseri, Rung, Kornai and Kertész (2011), which Yasseri and colleagues used in 2013 to rank Wikipedia's most controversial articles. Bots are excluded.</p>
       <p><strong>What it measures:</strong> how much back-and-forth reverting a page saw. <strong>What it doesn't:</strong> who was right, whether the page is biased, or how many people read it.</p>
       <ul>
+        <li>Most pages never see an edit war: depending on the year, only 0.2% to 1.5% of edited pages score above zero. The site lists all <span id="n-page-years"></span> page-years with a score above zero. A page missing from a year had no edit war that year.</li>
+        <li>Pages with equal scores share a rank. Low scores are common, so many pages tie further down the list.</li>
         <li>Pages are followed by their ID, so renames don't split a page's history. Titles shown are the current ones.</li>
         <li>“Kind” is the page's Wikidata type today, and is missing for some pages.</li>
         <li id="partial-note"></li>

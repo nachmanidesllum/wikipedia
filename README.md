@@ -1,6 +1,6 @@
 # Where Wikipedia fights
 
-The 500 most fought-over pages on English Wikipedia in every year from 2005 to 2026, ranked by an edit-war score. The site lets you look up any page that made a year's top 500, or browse a year.
+Every English Wikipedia page that saw an edit war between 2005 and 2026, ranked year by year by an edit-war score. The site lets you look up any of these pages, or browse a year.
 
 ## The score
 
@@ -12,8 +12,15 @@ It measures back-and-forth reverting. It does not measure bias, who was right, o
 
 ## Data
 
-- `data/top500.json`: for each year, the top 500 pages with rank, score and the number of editors in mutual reverts, plus each page's current title and Wikidata type.
-- Source: the Wikimedia `mediawiki_history` dump (snapshot 2026-09) and Wikidata. 2026 covers only part of the year.
-- Pages are identified by page ID, so renamed pages keep one history.
+Every page-year with a score above zero is included: 387,110 page-years across 207,102 pages. Page-years scoring zero (over 99% of all page-years) are left out.
 
-`scripts/export_site_data.py` builds `data/top500.json` from the full rankings.
+- `data/meta.json`: years, pages edited per year, Wikidata type labels, and the #1 page and #1 person for each year.
+- `data/years/<year>.json`: every page with a score that year, as `[rank, page_id, score, editors, title, type]`.
+- `data/hist/<k>.json`: each page's history, split into 64 files by `page_id % 64`.
+- `data/pages.json`: the search index.
+
+Ranks are among all pages that year. Ties share the best rank.
+
+Source: the Wikimedia `mediawiki_history` dump (snapshot 2026-09) and Wikidata. 2026 covers only part of the year. Pages are identified by page ID, so renamed pages keep one history. Titles and Wikidata types are current, not historical.
+
+`scripts/export_site_data.py` builds `data/` from the full annual scores.
