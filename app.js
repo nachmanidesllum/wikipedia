@@ -40,8 +40,8 @@ const wikiUrl = (pid) => `https://en.wikipedia.org/?curid=${pid}`;
 const yearLabel = (y) => (partial[y] ? `${y}*` : String(y));
 function topShare(rank, year) {
   const pct = (100 * rank) / META.pages_edited[year];
-  if (pct < 0.01) return "top 0.01%";
-  return `top ${pct < 1 ? pct.toPrecision(1) : Math.ceil(pct)}%`;
+  if (pct < 0.001) return "0.001%";
+  return `${pct < 1 ? Number(pct.toPrecision(1)) : Math.ceil(pct)}%`;
 }
 
 async function init() {
@@ -163,20 +163,21 @@ async function renderPage(pid) {
       <a href="${wikiUrl(pid)}" target="_blank" rel="noopener">Open on Wikipedia ↗</a>
     </div>
     <div class="pv-stats">
-      <div><b>#${whole.format(best.rank)}</b>best rank (${yearLabel(best.year)}), ${topShare(best.rank, best.year)} of pages edited</div>
+      <div><b>#${whole.format(best.rank)}</b>best rank (${yearLabel(best.year)})</div>
       <div><b>${rows.length}</b>of ${META.years.length} years with an edit war</div>
       <div><b>${compact.format(peak.M)}</b>peak score (${yearLabel(peak.year)})</div>
     </div>
     ${chart(rows)}
-    <p class="chart-note">Rank among all English Wikipedia pages that year (log scale). Grey marks: no edit war that year.${Object.keys(partial).length ? " * Partial year." : ""}</p>
+    <p class="chart-note">Rank among all English Wikipedia pages that year (log scale). Hover or tap for a year's rank. Grey marks: no edit war that year.${Object.keys(partial).length ? " * Partial year." : ""}</p>
     <details>
       <summary>Year by year</summary>
       <div class="table-wrap" style="margin-top:10px">
-        <table><thead><tr><th>Year</th><th class="num">Rank</th><th class="num">Score</th><th class="num">Editors in mutual reverts</th></tr></thead>
-        <tbody>${rows.map((r) => `<tr><td>${yearLabel(r.year)}</td><td class="num">#${whole.format(r.rank)}</td><td class="num">${whole.format(r.M)}</td><td class="num">${whole.format(r.editors)}</td></tr>`).join("")}</tbody></table>
+        <table><thead><tr><th>Year</th><th class="num">Rank</th><th class="num">Top % of pages edited</th><th class="num">Score</th><th class="num hide-sm">Editors in mutual reverts</th></tr></thead>
+        <tbody>${rows.map((r) => `<tr><td>${yearLabel(r.year)}</td><td class="num">#${whole.format(r.rank)}</td><td class="num">${topShare(r.rank, r.year)}</td><td class="num">${whole.format(r.M)}</td><td class="num hide-sm">${whole.format(r.editors)}</td></tr>`).join("")}</tbody></table>
       </div>
     </details>`;
   view.hidden = false;
+  attachChartHover(view.querySelector(".chart"));
 }
 
 function chart(rows) {
@@ -189,6 +190,9 @@ function chart(rows) {
   let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Rank by year">`;
   for (let t = 1; t <= top; t *= 10) {
     svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text x="${L - 8}" y="${y(t) + 4}" text-anchor="end">#${compact.format(t)}</text>`;
+    for (const m of [2, 5]) {
+      if (t * m <= top) svg += `<line class="grid minor" x1="${L}" x2="${W - R}" y1="${y(t * m)}" y2="${y(t * m)}"/>`;
+    }
   }
   for (const yr of years) {
     if (yr % 5 === 0 || yr === years[0] || (yr === years[n - 1] && yr % 5 >= 3)) {
@@ -202,14 +206,56 @@ function chart(rows) {
   }
   svg += `<path class="line" d="${path}"/>`;
   const best = rows.reduce((a, b) => (b.rank < a.rank ? b : a));
+  const bx = x(best.year), anchor = bx > W - 80 ? "end" : bx < L + 40 ? "start" : "middle";
+  svg += `<text class="val best" x="${bx}" y="${Math.max(y(best.rank) - 9, 11)}" text-anchor="${anchor}">#${whole.format(best.rank)}</text>`;
+  svg += `<line class="guide" y1="${T}" y2="${H - B}" visibility="hidden"/>`;
   for (const yr of years) {
     const r = at.get(yr);
-    if (!r) { svg += `<rect class="miss" x="${x(yr) - 3}" y="${H - B + 4}" width="6" height="3" rx="1"><title>${yr}: no edit war</title></rect>`; continue; }
-    svg += `<circle class="dot${partial[yr] ? " partial" : ""}" cx="${x(yr)}" cy="${y(r.rank)}" r="4"><title>${yearLabel(yr)}: #${whole.format(r.rank)}, score ${whole.format(r.M)}</title></circle>`;
+    if (!r) { svg += `<rect class="miss" x="${x(yr) - 3}" y="${H - B + 4}" width="6" height="3" rx="1"/>`; continue; }
+    svg += `<circle class="dot${partial[yr] ? " partial" : ""}" data-year="${yr}" cx="${x(yr)}" cy="${y(r.rank)}" r="4"/>`;
   }
-  const bx = x(best.year), anchor = bx > W - 80 ? "end" : bx < L + 40 ? "start" : "middle";
-  svg += `<text class="val" x="${bx}" y="${Math.max(y(best.rank) - 9, 11)}" text-anchor="${anchor}">#${whole.format(best.rank)}</text>`;
+  svg += `<g class="tip" visibility="hidden"><rect rx="6" height="24"/><text y="16"></text></g>`;
+  // one invisible hit area per year column, so hovering anywhere in the column works
+  const step = (W - L - R) / (n - 1);
+  for (const yr of years) {
+    const r = at.get(yr);
+    const label = r ? `${yearLabel(yr)} · #${whole.format(r.rank)}` : `${yr} · no edit war`;
+    const cy = r ? y(r.rank) : H - B;
+    svg += `<rect class="hit" data-year="${yr}" data-x="${x(yr)}" data-y="${cy}" data-label="${esc(label)}" x="${x(yr) - step / 2}" y="${T - 10}" width="${step}" height="${H - T - B + 20}"/>`;
+  }
   return svg + "</svg>";
+}
+
+function attachChartHover(svg) {
+  const W = svg.viewBox.baseVal.width;
+  const guide = svg.querySelector(".guide"), tip = svg.querySelector(".tip");
+  const box = tip.querySelector("rect"), text = tip.querySelector("text");
+  const best = svg.querySelector(".best");
+  const hide = () => {
+    guide.setAttribute("visibility", "hidden");
+    tip.setAttribute("visibility", "hidden");
+    best.removeAttribute("visibility");
+    svg.querySelectorAll(".dot.on").forEach((d) => d.classList.remove("on"));
+  };
+  const show = (hit) => {
+    hide();
+    const cx = +hit.dataset.x, cy = +hit.dataset.y;
+    guide.setAttribute("x1", cx); guide.setAttribute("x2", cx);
+    guide.removeAttribute("visibility");
+    svg.querySelector(`.dot[data-year="${hit.dataset.year}"]`)?.classList.add("on");
+    text.textContent = hit.dataset.label;
+    const w = text.getComputedTextLength() + 16;
+    const tx = Math.min(Math.max(cx - w / 2, 2), W - w - 2);
+    const ty = Math.max(cy - 36, 0);
+    tip.setAttribute("transform", `translate(${tx},${ty})`);
+    box.setAttribute("width", w);
+    text.setAttribute("x", 8);
+    tip.removeAttribute("visibility");
+    best.setAttribute("visibility", "hidden");
+  };
+  svg.addEventListener("pointerover", (e) => { const h = e.target.closest(".hit"); if (h) show(h); });
+  svg.addEventListener("pointerdown", (e) => { const h = e.target.closest(".hit"); if (h) show(h); });
+  svg.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hide(); });
 }
 
 /* ---------- browse ---------- */

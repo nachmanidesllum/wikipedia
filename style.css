@@ -105,6 +105,12 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .chart { width: 100%; height: auto; display: block; margin-top: 8px; }
 .chart text { fill: var(--muted); font-size: 11px; }
 .chart .grid { stroke: var(--line); }
+.chart .grid.minor { stroke-opacity: .8; stroke-dasharray: 2 4; }
+.chart .hit { fill: transparent; cursor: crosshair; }
+.chart .guide { stroke: var(--muted); stroke-dasharray: 3 3; }
+.chart .dot.on { r: 7px; }
+.chart .tip rect { fill: var(--ink); }
+.chart .tip text { fill: var(--bg); font-size: 13px; font-weight: 600; }
 .chart .line { stroke: var(--accent); fill: none; stroke-width: 2; }
 .chart .dot { fill: var(--accent); }
 .chart .dot.partial { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
@@ -146,4 +152,7 @@ td .p { color: var(--person); }
   .strip { grid-auto-columns: 150px; }
   .chart text { font-size: 20px; }
   .chart .dot { r: 6px; }
+  .chart .dot.on { r: 10px; }
+  .chart .tip rect { height: 34px; }
+  .chart .tip text { font-size: 22px; transform: translateY(6px); }
 }
