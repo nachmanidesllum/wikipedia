@@ -4,7 +4,7 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const whole = new Intl.NumberFormat("en");
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 10;
 
 let META, partial;
 let browseLimit = PAGE_SIZE;
