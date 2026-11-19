@@ -156,3 +156,10 @@ td .p { color: var(--person); }
   .chart .tip rect { height: 34px; }
   .chart .tip text { font-size: 22px; transform: translateY(6px); }
 }
+
+.talk-summaries { margin: 18px 0; padding: 14px 0; border-block: 1px solid var(--line); }
+.talk-summaries-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.talk-summaries-head h4, .talk-summary-body p { margin: 0; }
+.talk-summaries-head label, .talk-summary-sources { font-size: 13px; }
+.talk-summary-body { margin-top: 8px; }
+.talk-summary-sources { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; }

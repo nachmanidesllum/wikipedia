@@ -23,6 +23,8 @@ const once = (cache, key, url) => {
 };
 const loadYear = (y) => once(yearCache, y, `data/years/${y}.json`);
 const loadShard = (k) => once(shardCache, k, `data/hist/${k}.json`);
+const summaryCache = new Map();
+const loadSummaries = () => once(summaryCache, "summaries", "data/talk-summaries.json");
 function loadPagesIndex() {
   if (!pagesIndex) pagesIndex = getJSON("data/pages.json").then((rows) =>
     rows.map(([pid, title, t, n, best]) => ({ pid: String(pid), title, key: title.toLowerCase(), t, n, best })));
@@ -169,6 +171,7 @@ async function renderPage(pid) {
     </div>
     ${chart(rows)}
     <p class="chart-note">Rank among all English Wikipedia pages that year (log scale). Hover or tap for a year's rank. Grey marks: no edit war that year.${Object.keys(partial).length ? " * Partial year." : ""}</p>
+    <section class="talk-summaries" aria-label="Talk-page summaries" hidden></section>
     <details>
       <summary>Year by year</summary>
       <div class="table-wrap" style="margin-top:10px">
@@ -178,6 +181,36 @@ async function renderPage(pid) {
     </details>`;
   view.hidden = false;
   attachChartHover(view.querySelector(".chart"));
+  if (rows.some((row) => row.rank <= 100)) {
+    const section = view.querySelector(".talk-summaries");
+    loadSummaries().then((summaries) => {
+      renderTalkSummaries(section, summaries[pid], rows);
+    }).catch((error) => console.warn("Could not load Talk summaries", error));
+  }
+}
+
+function renderTalkSummaries(section, summaries, rows) {
+  const available = rows.filter(({ year }) => summaries?.[year]).map(({ year }) => year);
+  if (!available.length) return;
+  available.sort((a, b) => b - a);
+  section.innerHTML = `
+    <div class="talk-summaries-head">
+      <h4>What editors discussed</h4>
+      <label>Year <select>${available.map((year) => `<option value="${year}">${yearLabel(year)}</option>`).join("")}</select></label>
+    </div>
+    <div class="talk-summary-body" aria-live="polite"></div>
+    <p class="chart-note">AI-assisted summaries of sampled Wikipedia Talk discussions around spikes in the edit-war score.</p>`;
+  const picker = section.querySelector("select");
+  const body = section.querySelector(".talk-summary-body");
+  const show = () => {
+    const { summary, sources } = summaries[picker.value];
+    const links = sources.map((source, i) =>
+      `<a href="${esc(source)}" target="_blank" rel="noopener">Talk source ${i + 1} ↗</a>`);
+    body.innerHTML = `<p>${esc(summary)}</p><div class="talk-summary-sources">${links.join("")}</div>`;
+  };
+  picker.addEventListener("change", show);
+  show();
+  section.hidden = false;
 }
 
 function chart(rows) {

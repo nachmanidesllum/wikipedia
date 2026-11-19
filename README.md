@@ -18,6 +18,7 @@ Every page-year with a score above zero is included: 387,110 page-years across 2
 - `data/years/<year>.json`: every page with a score that year, as `[rank, page_id, score, editors, title, type]`.
 - `data/hist/<k>.json`: each page's history, split into 64 files by `page_id % 64`.
 - `data/pages.json`: the search index.
+- `data/talk-summaries.json`: short AI-assisted summaries and Talk revision links, keyed by page ID and year. These cover sampled discussions around the ten largest daily score increases, using merged seven-day windows.
 
 Ranks are among all pages that year. Ties share the best rank.
 
